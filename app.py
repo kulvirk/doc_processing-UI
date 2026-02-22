@@ -17,19 +17,24 @@ st.title("📄 Parts Extractor — PDF → Excel")
 # HELPER: PDF VIEWER (SCROLLABLE)
 # ======================================================
 
-def pdf_viewer(file_bytes: bytes, height: int = 800):
-    """Render a scrollable PDF viewer inside Streamlit."""
-    base64_pdf = base64.b64encode(file_bytes).decode("utf-8")
-    pdf_display = f'''
-        <iframe
-            src="data:application/pdf;base64,{base64_pdf}"
-            width="100%"
-            height="{height}"
+import streamlit.components.v1 as components
+
+def pdf_viewer(file_bytes: bytes, height: int = 900):
+    """Chrome-safe scrollable PDF viewer"""
+    b64 = base64.b64encode(file_bytes).decode()
+
+    html = f"""
+    <div style="height:{height}px; overflow:auto; border:1px solid #ccc;">
+        <embed
+            src="data:application/pdf;base64,{b64}"
             type="application/pdf"
-            style="border:1px solid #ccc;"
-        ></iframe>
-    '''
-    st.markdown(pdf_display, unsafe_allow_html=True)
+            width="100%"
+            height="100%"
+        />
+    </div>
+    """
+
+    components.html(html, height=height + 20, scrolling=True)
 
 # ======================================================
 # FILE UPLOAD
@@ -110,3 +115,4 @@ if uploaded_file is not None:
         os.unlink(pdf_path)
     except Exception:
         pass
+
