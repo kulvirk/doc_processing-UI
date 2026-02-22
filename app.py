@@ -23,21 +23,39 @@ st.title("📄 Parts Extractor — PDF → Excel")
 # ======================================================
 
 def pdf_viewer(file_bytes: bytes, height: int = 900):
-    """Ultra-reliable PDF viewer (works on Cloud + Chrome + Edge)"""
+    """Chrome-safe PDF viewer using Blob URL"""
 
     b64 = base64.b64encode(file_bytes).decode("utf-8")
 
-    pdf_display = f"""
-    <iframe
-        src="data:application/pdf;base64,{b64}"
-        width="100%"
-        height="{height}"
-        style="border:1px solid #ccc;"
-        type="application/pdf">
-    </iframe>
+    html = f"""
+    <html>
+    <body style="margin:0;padding:0;">
+        <iframe id="pdfFrame"
+                width="100%"
+                height="{height}px"
+                style="border:none;">
+        </iframe>
+
+        <script>
+        const base64Data = "{b64}";
+        const binary = atob(base64Data);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+
+        for (let i = 0; i < len; i++) {{
+            bytes[i] = binary.charCodeAt(i);
+        }}
+
+        const blob = new Blob([bytes], {{ type: "application/pdf" }});
+        const url = URL.createObjectURL(blob);
+
+        document.getElementById("pdfFrame").src = url;
+        </script>
+    </body>
+    </html>
     """
 
-    components.html(pdf_display, height=height + 20)
+    components.html(html, height=height)
 
 # ======================================================
 # FILE UPLOAD
@@ -136,4 +154,5 @@ if uploaded_file is not None:
         os.unlink(pdf_path)
     except Exception:
         pass
+
 
