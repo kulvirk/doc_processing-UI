@@ -2,6 +2,8 @@ import streamlit as st
 import tempfile
 import os
 import base64
+from PyPDF2 import PdfReader, PdfWriter
+from io import BytesIO
 
 from run_pipeline import run
 
@@ -243,3 +245,4 @@ with right:
             st.info("Debug file not found.")
     else:
         st.info("Run extraction to view Debug PDF")
+
