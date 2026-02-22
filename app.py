@@ -1,32 +1,40 @@
 import streamlit as st
 import tempfile
 import os
-from io import BytesIO
-from PyPDF2 import PdfReader
+import base64
 
-# ======================================================
-# DEMO PIPELINE — Replace with your real run() function
-# ======================================================
-
-def run_pipeline(pdf_path, pages=None):
-    """
-    Replace this with your actual pipeline.
-    For demo: returns same PDF as debug output.
-    """
-    return pdf_path
-
-
-# ======================================================
-# STREAMLIT CONFIG
-# ======================================================
+from run_pipeline import run
 
 st.set_page_config(
-    page_title="PDF Parts Extractor",
+    page_title="Parts Extractor",
     page_icon="📄",
     layout="wide"
 )
 
-st.title("📄 PDF Viewer + Page Selection + Debug Viewer")
+st.title("📄 Parts Extractor — PDF → Excel")
+
+# ======================================================
+# HELPER: PDF VIEWER (SCROLLABLE, CHROME SAFE)
+# ======================================================
+
+import streamlit.components.v1 as components
+
+def pdf_viewer(file_bytes: bytes, height: int = 900):
+    """Chrome-safe scrollable PDF viewer"""
+    b64 = base64.b64encode(file_bytes).decode()
+
+    html = f"""
+    <div style="height:{height}px; overflow:auto; border:1px solid #ccc;">
+        <embed
+            src="data:application/pdf;base64,{b64}"
+            type="application/pdf"
+            width="100%"
+            height="100%"
+        />
+    </div>
+    """
+
+    components.html(html, height=height + 20, scrolling=True)
 
 # ======================================================
 # FILE UPLOAD
@@ -37,97 +45,90 @@ uploaded_file = st.file_uploader(
     type=["pdf"]
 )
 
-# ======================================================
-# MAIN LOGIC
-# ======================================================
-
 if uploaded_file is not None:
 
-    pdf_bytes = uploaded_file.getvalue()
+    file_bytes = uploaded_file.read()
 
-    # Save to temp file for pipeline use
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    temp_file.write(pdf_bytes)
-    temp_file.close()
+    # Save to temp file for pipeline
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes)
+        pdf_path = tmp.name
 
-    pdf_path = temp_file.name
+    st.success("PDF uploaded successfully")
 
-    # --------------------------------------------------
-    # GET PAGE COUNT
-    # --------------------------------------------------
-    reader = PdfReader(BytesIO(pdf_bytes))
-    total_pages = len(reader.pages)
+    # ==================================================
+    # LAYOUT: TWO COLUMNS
+    # ==================================================
 
-    st.success(f"Total Pages: {total_pages}")
+    left_col, right_col = st.columns(2)
 
-    # --------------------------------------------------
-    # PAGE SELECTION
-    # --------------------------------------------------
-    page_options = list(range(1, total_pages + 1))
+    # ------------------ INPUT PDF VIEW -----------------
+    with left_col:
+        st.subheader("📥 Input PDF Preview")
+        pdf_viewer(file_bytes, height=900)
 
-    selected_pages = st.multiselect(
-        "Select pages to process (random allowed)",
-        options=page_options,
-        default=st.session_state.get("pages_to_process", [])
-    )
+    # ==================================================
+    # RUN EXTRACTION
+    # ==================================================
 
-    if st.button("Save Page List"):
-        st.session_state["pages_to_process"] = selected_pages
-        st.success("Page list saved!")
+    if st.button("▶ Run Extraction"):
 
-    st.write("📌 Selected Pages:",
-             st.session_state.get("pages_to_process", []))
+        with st.spinner("Processing..."):
+            output_xlsx, debug_pdf = run(pdf_path=pdf_path)
 
-    # --------------------------------------------------
-    # LAYOUT — PDF VIEWER
-    # --------------------------------------------------
-    left, right = st.columns([2, 1])
+        st.success("Extraction complete")
 
-    with left:
-        st.subheader("Uploaded PDF")
+        # Save debug path in session (IMPORTANT)
+        st.session_state["debug_pdf_path"] = debug_pdf
+        st.session_state["output_xlsx_path"] = output_xlsx
 
-        # ⭐ SAFE BUILT-IN VIEWER
-        st.pdf(pdf_bytes, key=f"viewer_main_{len(pdf_bytes)}") #st.pdf(pdf_bytes)
+    # ==================================================
+    # SHOW OUTPUT (PERSISTENT AFTER RERUN)
+    # ==================================================
 
-    with right:
-        st.info("Use scroll / zoom controls inside viewer")
+    if "output_xlsx_path" in st.session_state:
 
-    # --------------------------------------------------
-    # RUN PIPELINE
-    # --------------------------------------------------
-    st.divider()
+        output_xlsx = st.session_state["output_xlsx_path"]
 
-    if st.button("🚀 Run Processing"):
+        if output_xlsx and os.path.exists(output_xlsx):
+            with open(output_xlsx, "rb") as f:
+                st.download_button(
+                    label="⬇ Download Excel",
+                    data=f,
+                    file_name=os.path.basename(output_xlsx),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        else:
+            st.error("Excel output not found")
 
-        pages = st.session_state.get("pages_to_process", None)
+    # ==================================================
+    # DEBUG PDF VIEW (RIGHT COLUMN — SINGLE VIEWER)
+    # ==================================================
 
-        debug_pdf_path = run_pipeline(
-            pdf_path=pdf_path,
-            pages=pages
-        )
+    if "debug_pdf_path" in st.session_state:
 
-        st.session_state["debug_pdf_path"] = debug_pdf_path
+        debug_pdf = st.session_state["debug_pdf_path"]
 
-        st.success("Processing complete!")
+        with right_col:
+            st.subheader("🛠 Debug PDF Preview")
 
-# ======================================================
-# SHOW DEBUG PDF AFTER EXECUTION
-# ======================================================
+            if debug_pdf and os.path.exists(debug_pdf):
+                with open(debug_pdf, "rb") as f:
+                    debug_bytes = f.read()
 
-if "debug_pdf_path" in st.session_state:
+                pdf_viewer(debug_bytes, height=900)
 
-    st.divider()
-    st.subheader("🛠 Debug PDF")
+                st.download_button(
+                    label="⬇ Download Debug PDF",
+                    data=debug_bytes,
+                    file_name=os.path.basename(debug_pdf),
+                    mime="application/pdf"
+                )
+            else:
+                st.info("No debug PDF generated.")
 
-    with open(st.session_state["debug_pdf_path"], "rb") as f:
-        debug_bytes = f.read()
-
-    st.pdf(debug_bytes, key=f"viewer_debug_{len(debug_bytes)}") #st.pdf(debug_bytes)
-
-    st.download_button(
-        "⬇ Download Debug PDF",
-        debug_bytes,
-        file_name="debug_output.pdf"
-    )
-
-
+    # Cleanup temp file when app reruns
+    try:
+        os.unlink(pdf_path)
+    except Exception:
+        pass
