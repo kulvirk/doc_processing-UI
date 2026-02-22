@@ -1,35 +1,4 @@
 import streamlit as st
-import tempfile
-import os
-
-from run_pipeline import run
-
-st.set_page_config(
-    page_title="Parts",
-    page_icon="📄",
-    layout="wide"
-)
-
-st.title("📄 Parts Extractor — PDF → Excel")
-
-# ======================================================
-# FILE UPLOAD
-# ======================================================
-
-uploaded_file = st.file_uploader(
-    "Upload PDF Manual",
-    type=["pdf"]
-)
-
-# ======================================================
-# METADATA INPUT (NEW SECTION)
-# ======================================================
-
-st.subheader("Project & Equipment Details (Optional)")
-
-col1, col2 = st.columns(2)
-
-vendor = col1.text_input("Vendor")import streamlit as st
 import base64
 import tempfile
 import os
@@ -336,4 +305,5 @@ if st.button("🚀 Run Extraction", use_container_width=True):
                     mime="application/pdf",
                     use_container_width=True
                 )
+
 
