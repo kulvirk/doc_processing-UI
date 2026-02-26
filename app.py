@@ -192,7 +192,7 @@ with right:
         """
         <style>
         .pdf-container {
-            height: 1400px;
+            height: 20000px;
             overflow: auto;
         }
         </style>
@@ -219,3 +219,4 @@ with right:
 
         else:
             st.info("Run extraction to view Debug PDF")
+
