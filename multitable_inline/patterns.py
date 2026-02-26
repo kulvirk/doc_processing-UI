@@ -39,6 +39,7 @@ PART_NUMBER_HEADERS = {
     "partno",
     "parts",
     "part number",
+    "partnumber",
     "p/n",
     "pn",
     "pin",

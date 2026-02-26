@@ -129,25 +129,33 @@ def is_parts_table(table_candidate, debug=False):
         for w in body_words
         if w.get("text")
     )
+    if debug:
+        print(f"[STEP2-DEBUG] rows count={len(rows)}")
+        for r in rows[:5]:
+            print([w["text"] for w in r["words"]])
 
     # ==================================================
     # 1️⃣ STRICT SIMPLE 2-COLUMN HEADER VALIDATION
     # ==================================================
-    for row in rows[:8]:
+    for row in rows:
+    
         tokens = [w["text"].lower().replace(".", "") for w in row["words"]]
         joined = " ".join(tokens)
     
+        # Accept both:
+        # "Part Number | Description"
+        # "Number | Description"
         if (
-            (
-                "partnumber" in joined
-                or "part number" in joined
+            ("description" in joined)
+            and (
+                "part number" in joined
                 or "partno" in joined
                 or "part no" in joined
+                or "number" in joined
             )
-            and "description" in joined
         ):
     
-            # Check visual 2-column layout from header row
+            # Ensure visually 2 columns (cluster X positions)
             header_x_positions = sorted(w["x0"] for w in row["words"])
             clusters = []
     
@@ -161,9 +169,9 @@ def is_parts_table(table_candidate, debug=False):
     
             if len(clusters) == 2:
                 if debug:
-                    print(f"[STEP2] Page {page} | STRICT SIMPLE_2COL_TABLE")
+                    print(f"[STEP2] Page {page} | STRICT SIMPLE_2COL_TABLE (header override)")
                 return "SIMPLE_2COL_TABLE"
-
+ 
     # ==================================================
     # 2️⃣ ALT-ID EARLY OPT-IN
     # ==================================================
@@ -175,6 +183,27 @@ def is_parts_table(table_candidate, debug=False):
     # ==================================================
     # 3️⃣ STRUCTURAL HEURISTIC (NUMERIC TABLES)
     # ==================================================
+
+    # --------------------------------------------------
+    # TRACEABILITY HEADER OVERRIDE
+    # Accept tables like:
+    # Description | Part number | Heat-code | Vendor
+    # --------------------------------------------------
+    for row in rows:
+        tokens = {
+            w["text"].lower().replace(".", "").replace(",", "")
+            for w in row["words"]
+        }
+        if (
+            "description" in tokens
+            and (
+                "partnumber" in tokens
+                or ("part" in tokens and "number" in tokens)
+            )
+        ):
+            if debug:
+                print(f"[STEP2] Page {page} | TRACEABILITY HEADER ACCEPTED")
+            return "NORMAL_TABLE"
 
     # HEADER OVERRIDE — if clear header row exists, accept
     for row in rows:
@@ -205,6 +234,10 @@ def is_parts_table(table_candidate, debug=False):
     # ==================================================
     # 4️⃣ REQUIRE STRUCTURAL PN COLUMN
     # ==================================================
+    if debug:
+        print(f"[STEP2-DEBUG] columns={columns}")
+        print(f"[STEP2-DEBUG] part_col={part_col}")
+    
     if part_col is None or not columns:
         if debug:
             print(f"[STEP2] Page {page} | Rejected (no PN column)")
@@ -223,6 +256,9 @@ def is_parts_table(table_candidate, debug=False):
                     pn_hits += 1
                     break
 
+    if debug:
+        print(f"[STEP2-DEBUG] pn_hits={pn_hits}")
+        print(f"[STEP2-DEBUG] MIN_PN_COLUMN_HITS={MIN_PN_COLUMN_HITS}")
     if pn_hits < MIN_PN_COLUMN_HITS:
         if debug:
             print("REASON: < MIN_PN_COLUMN_HITS")

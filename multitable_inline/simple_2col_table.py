@@ -6,9 +6,15 @@ SIMPLE2_PN_REGEX = re.compile(
     r"""
     ^
     (
-        [A-Z]{4,}[A-Z0-9]{1,}     # industrial product codes like SPXCDALMFX
+        \d{4,}                              # pure numeric
         |
-        \d{4,}                   # fallback numeric
+        [A-Z]{4,}[A-Z0-9]*                 # long uppercase industrial codes
+        |
+        [A-Z0-9]+(?:[-/][A-Z0-9]+)+        # hyphen/slash codes
+        |
+        [A-Z]{2,}\d{3,}[A-Z]?              # OEM style
+        |
+        \d+[A-Z]+\d*                       # 110377E200
     )
     $
     """,
@@ -37,9 +43,19 @@ def extract_simple_2col_table(normalized_table, debug=False):
     # --------------------------------------------------
     header_row = None
 
-    for row in rows[:6]:
+    for row in rows:
         row_text = " ".join(w["text"].lower() for w in row["words"])
-        if "part" in row_text and "description" in row_text:
+    
+        # Accept both:
+        # "Part Number | Description"
+        # "Number | Description"
+        if (
+            "description" in row_text
+            and (
+                "part" in row_text
+                or "number" in row_text
+            )
+        ):
             header_row = row
             break
 
@@ -66,6 +82,13 @@ def extract_simple_2col_table(normalized_table, debug=False):
         # Detect "Part Number"
         if text == "part" and i + 1 < len(words_sorted):
             next_text = words_sorted[i + 1]["text"].lower().replace(".", "").strip()
+            # Detect standalone "Number" header
+        if text == "number":
+            w = words_sorted[i]
+            pn_left = w["x0"]
+            pn_right = w["x1"]
+            i += 1
+            continue
             if next_text in {"number", "no"}:
                 w1 = words_sorted[i]
                 w2 = words_sorted[i + 1]
