@@ -198,10 +198,11 @@ with right:
                 pdf_bytes = f.read()
 
             # ⭐ Native Streamlit PDF Viewer
-            st.pdf_viewer(pdf_bytes)
+            st.pdf(pdf_bytes)
 
         else:
             st.info("Debug file not found.")
 
     else:
         st.info("Run extraction to view Debug PDF")
+
