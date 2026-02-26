@@ -19,7 +19,7 @@ st.title("📄 Parts Extractor — PDF → Excel")
 left, right = st.columns([1, 1])
 
 # ======================================================
-# LEFT SIDE — FULL UI
+# LEFT SIDE — UI
 # ======================================================
 
 with left:
@@ -181,7 +181,7 @@ with left:
             )
 
 # ======================================================
-# RIGHT SIDE — SCROLLABLE PDF VIEWER
+# RIGHT SIDE — PDF VIEWER
 # ======================================================
 
 with right:
@@ -197,8 +197,8 @@ with right:
             with open(debug_path, "rb") as f:
                 pdf_bytes = f.read()
 
-            # Native Streamlit PDF viewer (scrollable + chrome-safe)
-            st.pdf(pdf_bytes)
+            # ⭐ Native Streamlit PDF Viewer
+            st.pdf_viewer(pdf_bytes)
 
         else:
             st.info("Debug file not found.")
