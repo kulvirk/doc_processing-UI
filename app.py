@@ -218,31 +218,28 @@ with right:
 
         if os.path.exists(debug_path):
 
-            debug_reader = PdfReader(debug_path)
-            debug_total = len(debug_reader.pages)
+            # Read full PDF
+            with open(debug_path, "rb") as f:
+                pdf_bytes = f.read()
 
-            debug_page = st.number_input(
-                "Debug page",
-                min_value=1,
-                max_value=debug_total,
-                value=1,
-                step=1,
-                key="debug_page"
-            )
+            # Encode to base64
+            base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
-            st.caption(f"📄 Page: {debug_page} / {debug_total}")
+            # Scrollable iframe viewer
+            pdf_display = f"""
+                <iframe
+                    src="data:application/pdf;base64,{base64_pdf}"
+                    width="100%"
+                    height="900px"
+                    type="application/pdf"
+                    style="border:none;">
+                </iframe>
+            """
 
-            writer = PdfWriter()
-            writer.add_page(debug_reader.pages[debug_page - 1])
-
-            buffer = BytesIO()
-            writer.write(buffer)
-            buffer.seek(0)
-
-            st.pdf(buffer.read())
+            st.markdown(pdf_display, unsafe_allow_html=True)
 
         else:
             st.info("Debug file not found.")
+
     else:
         st.info("Run extraction to view Debug PDF")
-
