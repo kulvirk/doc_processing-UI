@@ -1,7 +1,9 @@
 from collections import defaultdict, Counter
 from openpyxl import Workbook
-import re,os
+import re, os
 from multitable_inline.extract_mark_table import extract_mark_table
+from multitable_inline.extract_ss_equivalent_table import extract_ss_equivalent_table
+from multitable_inline.extract_multi_pn_table import extract_multi_pn_table
 from multitable_inline.extract_pmh_mos_table import extract_pmh_mos_table
 from multitable_inline.extract_balloon_bom_table import extract_balloon_bom_table
 from multitable_inline.extract_recommended_spares_table import extract_recommended_spares_table
@@ -30,6 +32,7 @@ KNOWN_VENDORS = [
     "Cameron",
     "NEUHAUS",
     "Expro",
+    "Bouer"
     "HANNON HYDRAULICS",
     "WILO",
     "VETCOGRAY",
@@ -315,7 +318,6 @@ def export_with_summary(all_parts,
         "Sub Project No-(Mnl)",
         "Equipment Name-(Mnl)"
     ])
-
     for p in all_parts:
         ws_parts.append([
             vendor,
@@ -404,11 +406,20 @@ def run(
     # ----------------------------------------------
     # STEP 1 — Extract words from ALL pages
     # ----------------------------------------------
-    pages_data = extract_table_candidates(pdf_path)
+    pages_data = extract_table_candidates(pdf_path, pages=pages)
     if not vendor:
         vendor, b= detect_vendor(pdf_path, pages_data, KNOWN_VENDORS)
     if not model:
         a,model = detect_vendor(pdf_path, pages_data, KNOWN_VENDORS)
+    
+    # ✅ If specific pages requested, filter early
+    if pages:
+        pages_set = set(pages)
+        pages_data = [p for p in pages_data if p["page"] in pages_set]
+    
+        if debug:
+            print(f"[PIPELINE] Filtered to pages: {sorted(pages_set)}")
+    
 
     if debug:
         print(f"[PIPELINE] Total pages scanned: {len(pages_data)}")
@@ -434,16 +445,32 @@ def run(
         # =====================================================
         # ⭐ 1️⃣ FORCE MARK TABLE (HIGHEST PRIORITY)
         # =====================================================
-        if (
-            re.search(r"\bmark\b", page_text_lower)
-            and re.search(r"\bdwg\b", page_text_lower)
-            and re.search(r"\bdescription\b", page_text_lower)
-        ):
+        # =====================================================
+        # ⭐ 1️⃣ FORCE MARK TABLE (ROW-LEVEL STRICT)
+        # =====================================================
+        
+        normalized_preview = normalize_table(page_data)
+        rows_preview = normalized_preview.get("rows", [])
+        
+        mark_forced = False
+        
+        for row in rows_preview:
+            row_text = " ".join(w["text"].lower() for w in row["words"])
+        
+            if (
+                "mark" in row_text
+                and "dwg" in row_text
+                and "description" in row_text
+            ):
+                mark_forced = True
+                break
+        
+        if mark_forced:
             if debug:
                 print(f"[PIPELINE] Page {page_no} | FORCED MARK TABLE MODE")
-    
+        
             normalized = normalize_table(page_data, debug=debug)
-    
+        
             if normalized and normalized.get("rows"):
                 extracted_parts = extract_mark_table(
                     normalized,
@@ -476,14 +503,46 @@ def run(
                     normalized,
                     debug=debug
                 )
+
+        # -------------------------------------------------
+        # SPECIAL SS-EQUIVALENT MULTI-PN TABLE
+        # -------------------------------------------------
+        
+        normalized_preview = normalize_table(page_data)
+        rows_preview = normalized_preview.get("rows", [])
+        
+        ss_equivalent_mode = False
+        
+        for row in rows_preview[:8]:
+            tokens = [w["text"].lower().replace(".", "") for w in row["words"]]
+            joined = " ".join(tokens)
+        
+            if (
+                "item" in joined
+                and "qty" in joined
+                and "part" in joined
+                and "number" in joined
+                and "ss" in joined
+                and "equivalent" in joined
+                and "description" in joined
+            ):
+                ss_equivalent_mode = True
+                break
+        
+        if ss_equivalent_mode:
+            if debug:
+                print(f"[PIPELINE] Page {page_no} | SS EQUIVALENT MULTI-PN MODE")
+        
+            normalized = normalize_table(page_data, debug=debug)
+            extracted_parts = extract_ss_equivalent_table(normalized, debug=debug)
     
         # =====================================================
         # ⭐ 3️⃣ SIMPLE 3-COLUMN TABLE (INDEPENDENT)
         # =====================================================
         elif (
             "qty" in page_text_lower
-            and "part number" in page_text_lower
             and "description" in page_text_lower
+            and page_text_lower.count("part number") == 1
         ):
             if debug:
                 print(f"[PIPELINE] Page {page_no} | TRY SIMPLE 3COL MODE")
@@ -604,34 +663,34 @@ def run(
                             debug=debug
                         )
                 
-                # ⭐ SPLIT HEADER ITEM/PART TABLE
-                elif (
-                    lambda normalized: any(
-                        (
-                            {"item", "part"}.issubset(
-                                {w["text"].lower() for w in normalized["rows"][i]["words"]}
-                            )
-                            and
-                            "number" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                            and
-                            "qty." in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                            and
-                            "description" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                        )
-                        for i in range(len(normalized["rows"]) - 1)
-                    )
-                )(
-                    normalize_table(page_data)
-                ):
-                    if debug:
-                        print(f"[PIPELINE] Page {page_no} | SPLIT HEADER TABLE MODE")
+                # # ⭐ SPLIT HEADER ITEM/PART TABLE
+                # elif (
+                #     lambda normalized: any(
+                #         (
+                #             {"item", "part"}.issubset(
+                #                 {w["text"].lower() for w in normalized["rows"][i]["words"]}
+                #             )
+                #             and
+                #             "number" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
+                #             and
+                #             "qty." in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
+                #             and
+                #             "description" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
+                #         )
+                #         for i in range(len(normalized["rows"]) - 1)
+                #     )
+                # )(
+                #     normalize_table(page_data)
+                # ):
+                #     if debug:
+                #         print(f"[PIPELINE] Page {page_no} | SPLIT HEADER TABLE MODE")
                 
-                    normalized = normalize_table(page_data, debug=debug)
+                #     normalized = normalize_table(page_data, debug=debug)
                 
-                    extracted_parts = extract_split_header_item_part_table(
-                        normalized,
-                        debug=debug
-                    )
+                #     extracted_parts = extract_split_header_item_part_table(
+                #         normalized,
+                #         debug=debug
+                #     )
 
                 # ---------- BALLOON BOM TABLE ----------
                 elif any(
@@ -695,6 +754,29 @@ def run(
                         normalized,
                         debug=debug
                     )
+
+                                # ⭐ MULTI-PN TABLE MODE
+                elif (
+                    normalized
+                    and any(
+                        "description" in " ".join(w["text"].lower() for w in row["words"])
+                        for row in normalized["rows"][:8]
+                    )
+                    and sum(
+                        1
+                        for row in normalized["rows"][:8]
+                        for w in row["words"]
+                        if w["text"].lower().replace(" ", "") in {"partnumber", "pn"}
+                    ) >= 2
+                ):
+                    if debug:
+                        print(f"[PIPELINE] Page {page_no} | MULTI-PN TABLE MODE")
+                
+                    extracted_parts = extract_multi_pn_table(
+                        normalized,
+                        debug=debug
+                    )
+
 
 
                 # ---------- NORMAL TABLE ----------
@@ -856,8 +938,9 @@ def run(
 # ==================================================
 if __name__ == "__main__":
     run(
-        pdf_path=r"C:\Users\Rajat\Downloads\4 Equ 108\BOP - Annular type\E108 Shaffer Bolted Cover Spherical BOP User Manual 2013-03-14.pdf",
-        output_csv=r"C:\Users\Rajat\Downloads\4 Equ 108\BOP - Annular type\E108 Shaffer Bolted Cover Spherical BOP User Manual 2013-03-14.csv",
+        pdf_path=r"C:\Users\Rajat\Downloads\350914031-Mo-mm-Mesa-Rotaria-Nov-Rst495-3g_debug.pdf",
+        output_csv=r"C:\Users\Rajat\Downloads\Bauer ME320D Breathing Air Compressor2.csv",
         debug=True,
+        pages=[158,173,160,161]
     )
  
