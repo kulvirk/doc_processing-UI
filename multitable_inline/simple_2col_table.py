@@ -1,66 +1,135 @@
 from multitable_inline.patterns import PART_NO_REGEX
 
+import re
+
+SIMPLE2_PN_REGEX = re.compile(
+    r"""
+    ^
+    (
+        [A-Z]{4,}[A-Z0-9]{1,}     # industrial product codes like SPXCDALMFX
+        |
+        \d{4,}                   # fallback numeric
+    )
+    $
+    """,
+    re.VERBOSE
+)
+
 def extract_simple_2col_table(normalized_table, debug=False):
 
     results = []
 
     page = normalized_table["page"]
-    rows = normalized_table["rows"]
-    columns = sorted(normalized_table.get("columns", []))
-    part_index = normalized_table.get("part_col")
+    rows = normalized_table.get("rows", [])
 
-    if not rows or part_index is None or not columns:
+    if not rows:
         return results
 
-    page_left = min(w["x0"] for row in rows for w in row["words"])
-    page_right = max(w["x1"] for row in rows for w in row["words"])
+    # --------------------------------------------------
+    # 1️⃣ PAGE BOUNDS
+    # --------------------------------------------------
+    all_words = [w for row in rows for w in row["words"]]
+    page_left = min(w["x0"] for w in all_words)
+    page_right = max(w["x1"] for w in all_words)
 
     # --------------------------------------------------
-    # 1️⃣ Find header row and exact x of "Description"
+    # 2️⃣ FIND HEADER ROW
     # --------------------------------------------------
     header_row = None
-    desc_header_x = None
 
-    for row in rows:
+    for row in rows[:6]:
         row_text = " ".join(w["text"].lower() for w in row["words"])
         if "part" in row_text and "description" in row_text:
             header_row = row
-            for w in row["words"]:
-                if "description" in w["text"].lower():
-                    desc_header_x = w["x0"]
-                    break
             break
 
-    if header_row is None or desc_header_x is None:
+    if header_row is None:
         if debug:
             print(f"[SIMPLE_2COL] Page {page} | Header not found")
         return results
 
-    COL_MARGIN = 6  # tighter margin
+    # --------------------------------------------------
+    # 3️⃣ DETECT HEADER COLUMN ENVELOPES
+    # --------------------------------------------------
+    pn_left = None
+    pn_right = None
+    desc_left = None
+    desc_right = None
+
+    words_sorted = sorted(header_row["words"], key=lambda w: w["x0"])
+
+    i = 0
+    while i < len(words_sorted):
+    
+        text = words_sorted[i]["text"].lower().replace(".", "").strip()
+    
+        # Detect "Part Number"
+        if text == "part" and i + 1 < len(words_sorted):
+            next_text = words_sorted[i + 1]["text"].lower().replace(".", "").strip()
+            if next_text in {"number", "no"}:
+                w1 = words_sorted[i]
+                w2 = words_sorted[i + 1]
+    
+                pn_left = min(w1["x0"], w2["x0"])
+                pn_right = max(w1["x1"], w2["x1"])
+                i += 2
+                continue
+    
+        if "part" in text:
+            w = words_sorted[i]
+            pn_left = w["x0"]
+            pn_right = w["x1"]
+    
+        if "description" in text:
+            w = words_sorted[i]
+            desc_left = w["x0"]
+            desc_right = w["x1"]
+    
+        i += 1
+    
+    
+    # ✅ MOVE VALIDATION HERE — AFTER LOOP
+    if pn_left is None or desc_left is None:
+        if debug:
+            print(f"[SIMPLE_2COL] Page {page} | Header columns not detected")
+            print(f"pn_left={pn_left}, desc_left={desc_left}")
+            print("Header words:", [w["text"] for w in header_row["words"]])
+        return results
+    
+    
+    # ✅ DEBUG PRINT HERE — AFTER VALIDATION
+    if debug:
+        print("\n" + "=" * 80)
+        print(f"[SIMPLE_2COL HEADER GEOMETRY] Page {page}")
+        print(f"PN  header: left={pn_left:.2f}, right={pn_right:.2f}")
+        print(f"DESC header: left={desc_left:.2f}, right={desc_right:.2f}")
+        print("=" * 80)
+
+    if pn_left is None or desc_left is None:
+        if debug:
+            print(f"[SIMPLE_2COL] Page {page} | Header columns not detected")
+        return results
 
     # --------------------------------------------------
-    # 2️⃣ PART column bounds (pure structural)
+    # 4️⃣ COMPUTE BOUNDS
     # --------------------------------------------------
-    if part_index == 0:
-        PART_LEFT = page_left
+    COL_MARGIN = 5
+
+    if pn_left < desc_left:
+        PART_LEFT  = page_left
+        PART_RIGHT = pn_right + 12
+        
+        DESC_LEFT  = PART_RIGHT + COL_MARGIN
+        DESC_RIGHT = page_right
     else:
-        PART_LEFT = columns[part_index - 1] + COL_MARGIN
-
-    # Slightly expand right side to fully include PN text
-    if part_index == len(columns) - 1:
+        PART_LEFT  = pn_left - COL_MARGIN
         PART_RIGHT = page_right
-    else:
-        PART_RIGHT = columns[part_index + 1] - (COL_MARGIN // 2)
-
-    # --------------------------------------------------
-    # 3️⃣ DESC bounds (strictly from header x-position)
-    # --------------------------------------------------
-    DESC_LEFT = desc_header_x
-    DESC_RIGHT = page_right
+        DESC_LEFT  = page_left
+        DESC_RIGHT = pn_left - COL_MARGIN
 
     if debug:
         print("=" * 80)
-        print(f"[SIMPLE_2COL BOUNDS] Page {page}")
+        print(f"[SIMPLE_2COL FINAL BOUNDS] Page {page}")
         print(f"PART range: {PART_LEFT:.2f} → {PART_RIGHT:.2f}")
         print(f"DESC range: {DESC_LEFT:.2f} → {DESC_RIGHT:.2f}")
         print("=" * 80)
@@ -68,7 +137,7 @@ def extract_simple_2col_table(normalized_table, debug=False):
     header_bottom = max(w["bottom"] for w in header_row["words"])
 
     # --------------------------------------------------
-    # 4️⃣ Extract rows
+    # 5️⃣ EXTRACT ROWS
     # --------------------------------------------------
     for row in rows:
 
@@ -78,33 +147,32 @@ def extract_simple_2col_table(normalized_table, debug=False):
         pn_words = [
             w for w in row["words"]
             if PART_LEFT <= w["x0"] <= PART_RIGHT
+            and SIMPLE2_PN_REGEX.fullmatch(w["text"])
         ]
 
         if not pn_words:
             continue
 
-        # Only take first token in PN column
         pn_word = sorted(pn_words, key=lambda w: w["x0"])[0]
-        pn = pn_word["text"]
 
         desc_words = [
             w for w in row["words"]
             if DESC_LEFT <= w["x0"] <= DESC_RIGHT
         ]
 
-        desc_words = sorted(desc_words, key=lambda w: w["x0"])
-        description = " ".join(w["text"] for w in desc_words).strip()
+        description = " ".join(
+            w["text"] for w in sorted(desc_words, key=lambda w: w["x0"])
+        ).strip()
 
         if not description:
             continue
 
         entry = {
             "page": page,
-            "part_no": pn,
+            "part_no": pn_word["text"],
             "description": description
         }
-
-        # Debug overlay support
+        
         if debug:
             entry["trace"] = {
                 "pn_boxes": [{
@@ -125,12 +193,10 @@ def extract_simple_2col_table(normalized_table, debug=False):
                     for w in desc_words
                 ]
             }
-
+        
         results.append(entry)
 
     if debug:
         print(f"[SIMPLE_2COL] Extracted {len(results)} rows")
 
     return results
-
-

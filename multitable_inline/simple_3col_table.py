@@ -31,8 +31,9 @@ def extract_simple_3col_table(normalized_table, debug=False):
     # 1️⃣ FIND HEADER ROW
     # -------------------------------------------------
     header_row = None
+    
+    for row in rows:
 
-    for row in rows[:6]:
         texts = [w["text"].upper() for w in row["words"]]
 
         if any("DESC" in t for t in texts) and any(
@@ -67,14 +68,32 @@ def extract_simple_3col_table(normalized_table, debug=False):
     # 3️⃣ Build PART → DESC blocks
     # -------------------------------------------------
     blocks = []
-
-    for i, w in enumerate(header_words):
-
-        t = w["text"].upper()
-
+    i = 0
+    while i < len(header_words):
+    
+        w = header_words[i]
+        t = w["text"].upper().replace(".", "")
+    
+        # Merge PART + NO
+        if t == "PART" and i + 1 < len(header_words):
+            next_w = header_words[i + 1]
+            next_t = next_w["text"].upper().replace(".", "")
+    
+            if next_t in {"NO", "NUMBER"}:
+                # Use merged envelope
+                merged = {
+                    "x0": min(w["x0"], next_w["x0"]),
+                    "x1": max(w["x1"], next_w["x1"]),
+                    "text": "PARTNO"
+                }
+                blocks.append(merged)
+                i += 2
+                continue
+    
         if any(k in t for k in ["PART", "ITEM", "MATERIAL", "ARTICLE"]):
-
             blocks.append(w)
+    
+        i += 1
 
     if not blocks:
         return results

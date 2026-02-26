@@ -175,6 +175,28 @@ def is_parts_table(table_candidate, debug=False):
     # ==================================================
     # 3️⃣ STRUCTURAL HEURISTIC (NUMERIC TABLES)
     # ==================================================
+
+    # HEADER OVERRIDE — if clear header row exists, accept
+    for row in rows:
+        tokens = {
+            w["text"].lower().replace(".", "").replace(",", "")
+            for w in row["words"]
+        }
+    
+        # Accept if header contains core fields
+        if (
+            "description" in tokens
+            and "qty" in tokens
+            and (
+                ("part" in tokens and "no" in tokens)
+                or "partno" in tokens
+                or "partnumber" in tokens
+            )
+        ):
+            if debug:
+                print(f"[STEP2] Page {page} | Header override accepted")
+            return "NORMAL_TABLE"
+
     if not looks_like_table(body_words):
         if debug:
             print(f"[STEP2] Page {page} | Rejected (no table structure)")

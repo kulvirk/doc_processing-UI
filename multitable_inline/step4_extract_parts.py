@@ -4,11 +4,21 @@ from multitable_inline.patterns import PART_NUMBER_HEADERS
 TABLE_PN_REGEX = re.compile(
     r"""
     \b(
-        \d{2}[A-Z]{2}\d{3,}         |   # 01PS0002
-        [A-Z]{2,}\d{3,}[A-Z]?      |   # OEM2906B
-        \d{3,}[-/]\d{2,}           |   # 222-7193
-        \d{5,}                     |   # pure numeric
-        \d{4,}[A-Z]?[-/A-Z0-9]*        # fallback industrial
+        \d{2}[A-Z]{2}\d{3,}
+        |
+        [A-Z]{2,}\d{3,}[A-Z]?
+        |
+        [A-Z]\d{3,}                 # ← ADD THIS
+        |
+        \d{3,}[-/]\d{2,}
+        |
+        \d{5,}
+        |
+        [A-Z]{2,}-\d{2,}           # CYL-0016, MNR-0008
+        |
+        [A-Z]\d{2,}                    # N634, N04058
+        |
+        \d{4,}[A-Z]?[-/A-Z0-9]*
     )\b
     """,
     re.VERBOSE
@@ -69,17 +79,41 @@ def extract_parts(normalized_table, debug=False):
     # =====================================================
     desc_x = None
     part_x = None
+    row_words = header_row["words"]
     header_x_positions = []
 
-    row_words = header_row["words"]
-    row_text_full = " ".join(w["text"] for w in row_words).lower()
-
-    for i, w in enumerate(row_words):
-
-        text = w["text"].strip().lower()
-        x = w["x0"]
-
+    i = 0
+    while i < len(row_words):
+    
+        w = row_words[i]
+        x = w["x0"]                      # ← ADD THIS BACK
+        text = w["text"].strip().lower().replace(".", "")
+    
+        # --- HANDLE MERGED "PART NO" ---
+        if text == "part" and i + 1 < len(row_words):
+            next_word = row_words[i + 1]
+            next_text = next_word["text"].strip().lower().replace(".", "")
+    
+            if next_text in {"no", "number"}:
+                merged_left = min(w["x0"], next_word["x0"])
+                merged_right = max(w["x1"], next_word["x1"])
+    
+                part_x = merged_left
+                header_x_positions.append(merged_left)
+    
+                i += 2
+                continue
+    
+        # normal column
         header_x_positions.append(x)
+    
+        if any(h in text for h in DESC_HEADERS):
+            desc_x = x
+    
+        if any(h in text for h in PART_NUMBER_HEADERS):
+            part_x = x
+    
+        i += 1
 
         # --- DESCRIPTION ---
         if any(h in text for h in DESC_HEADERS):
@@ -91,9 +125,22 @@ def extract_parts(normalized_table, debug=False):
 
         # --- HANDLE SPLIT "PART NO" / "PART NUMBER" ---
         if text == "part" and i + 1 < len(row_words):
-            next_text = row_words[i + 1]["text"].strip().lower().replace(".", "")
+            next_word = row_words[i + 1]
+            next_text = next_word["text"].strip().lower().replace(".", "")
+        
             if next_text in {"no", "number"}:
-                part_x = x
+        
+                # Merge geometry of Part + No.
+                merged_left = min(w["x0"], next_word["x0"])
+                merged_right = max(w["x1"], next_word["x1"])
+        
+                part_x = merged_left
+        
+                # 🔥 Store merged envelope width for later use
+                merged_part_header = {
+                    "left": merged_left,
+                    "right": merged_right
+                }
 
     if desc_x is None or part_x is None:
         if debug:
@@ -131,17 +178,30 @@ def extract_parts(normalized_table, debug=False):
     # 6️⃣ COMPUTE PART NUMBER BOUNDS
     # =====================================================
 
-    if part_index == 0:
-        PART_LEFT = page_left
+    # If we detected merged Part No., use its real width
+    if 'merged_part_header' in locals():
+    
+        PART_LEFT = merged_part_header["left"] - COL_MARGIN
+    
+        # Right boundary should extend until next header column
+        if part_index == len(header_x_positions) - 1:
+            PART_RIGHT = page_right
+        else:
+            next_col = header_x_positions[part_index + 1]
+            PART_RIGHT = next_col - COL_MARGIN
+    
     else:
-        prev_col = header_x_positions[part_index - 1]
-        PART_LEFT = prev_col + COL_MARGIN
-
-    if part_index == len(header_x_positions) - 1:
-        PART_RIGHT = page_right
-    else:
-        next_col = header_x_positions[part_index + 1]
-        PART_RIGHT = next_col - COL_MARGIN
+        if part_index == 0:
+            PART_LEFT = page_left
+        else:
+            prev_col = header_x_positions[part_index - 1]
+            PART_LEFT = prev_col + COL_MARGIN
+    
+        if part_index == len(header_x_positions) - 1:
+            PART_RIGHT = page_right
+        else:
+            next_col = header_x_positions[part_index + 1]
+            PART_RIGHT = next_col - COL_MARGIN
 
     if debug:
         print("=" * 80)

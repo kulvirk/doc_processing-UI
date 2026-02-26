@@ -8,6 +8,51 @@ def is_structural_word(w):
         t.upper() in {"REF", "NS"} or
         PART_NO_REGEX.search(t)
     )
+
+def _looks_like_header_row(row):
+
+    HEADER_KEYWORDS = {
+        "item", "part", "number", "description",
+        "p/n", "pin", "qty", "article", "material", "no", "#"
+    }
+
+    tokens = [
+        w["text"].lower().replace(".", "").strip()
+        for w in row["words"]
+    ]
+
+    # Split combined tokens like PARTNUMBER
+    expanded_tokens = []
+
+    for t in tokens:
+        expanded_tokens.append(t)
+
+        # split camel/compound uppercase cases
+        if t == t.upper() and len(t) > 8:
+            # try splitting common patterns
+            if "partnumber" in t:
+                expanded_tokens.extend(["part", "number"])
+            if "billofmaterials" in t:
+                expanded_tokens.extend(["billofmaterials"])  # NOT material
+
+    hits = sum(1 for t in expanded_tokens if t in HEADER_KEYWORDS)
+
+    return hits >= 2
+
+def _pn_evidence_below(rows, start_index):
+
+    from multitable_inline.patterns import PART_NO_REGEX
+
+    pn_hits = 0
+
+    for r in rows[start_index + 1: start_index + 8]:
+        for w in r["words"]:
+            if PART_NO_REGEX.search(w["text"]):
+                pn_hits += 1
+                break
+
+    return pn_hits >= 2
+    
 def _merge_fragmented_words(row_words, gap_threshold=6):
     """
     Merge adjacent word fragments that belong to the same visual word.
@@ -169,6 +214,84 @@ def normalize_table(table_candidate, debug=False):
 
     # Optional: also sort rows top-to-bottom strictly
     rows = sorted(rows, key=lambda r: r["top"])
+
+    # -------------------------------------------------
+    # ⭐ MULTI-LINE HEADER MERGE (FIRST 2 ROWS ONLY)
+    # -------------------------------------------------
+    # -------------------------------------------------
+    # ⭐ SMART MULTI-LINE HEADER MERGE
+    # -------------------------------------------------
+
+    i = 0
+    while i < len(rows) - 1:
+
+        row1 = rows[i]
+        row2 = rows[i + 1]
+
+        vertical_gap = row2["top"] - row1["top"]
+
+        if vertical_gap > 20:
+            i += 1
+            continue
+
+        if not _looks_like_header_row(row1):
+            i += 1
+            continue
+
+        if not _looks_like_header_row(row2):
+            i += 1
+            continue
+
+        # Confirm PN evidence below
+        if not _pn_evidence_below(rows, i):
+            i += 1
+            continue
+
+        merged_words = []
+        used_row2 = set()
+
+        for w1 in row1["words"]:
+
+            best_match = None
+            best_dx = 9999
+
+            for idx, w2 in enumerate(row2["words"]):
+                dx = abs(w1["x0"] - w2["x0"])
+                if dx < 25 and dx < best_dx:
+                    best_dx = dx
+                    best_match = (idx, w2)
+
+            if best_match:
+                idx, w2 = best_match
+                used_row2.add(idx)
+
+                new_word = {
+                    "text": f"{w1['text']} {w2['text']}",
+                    "x0": min(w1["x0"], w2["x0"]),
+                    "x1": max(w1["x1"], w2["x1"]),
+                    "top": min(w1["top"], w2["top"]),
+                    "bottom": max(w1["bottom"], w2["bottom"]),
+                }
+
+                merged_words.append(new_word)
+
+            else:
+                merged_words.append(w1)
+
+        for idx, w2 in enumerate(row2["words"]):
+            if idx not in used_row2:
+                merged_words.append(w2)
+
+        rows[i] = {
+            "top": min(row1["top"], row2["top"]),
+            "words": sorted(merged_words, key=lambda w: w["x0"])
+        }
+
+        rows.pop(i + 1)
+
+        # Do not increment i → allow cascading merges
+
+    # END WHILE
 
     # -------------------------------------------------
     # 4. DETECT TABLE TITLE (NEW)
