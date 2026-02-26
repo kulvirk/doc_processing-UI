@@ -1,39 +1,16 @@
 import streamlit as st
 import tempfile
 import os
-import base64
-from PyPDF2 import PdfReader, PdfWriter
-from io import BytesIO
 
 from run_pipeline import run
 
 st.set_page_config(
-    page_title="Parts",
+    page_title="Parts Extractor",
     page_icon="📄",
     layout="wide"
 )
 
 st.title("📄 Parts Extractor — PDF → Excel")
-
-
-# ======================================================
-# PDF VIEWER (SCROLLABLE ONLY ON RIGHT)
-# ======================================================
-
-def pdf_viewer(file_path):
-    with open(file_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
-
-    pdf_display = f"""
-        <iframe
-            src="data:application/pdf;base64,{base64_pdf}"
-            width="100%"
-            height="1100px"
-            style="border:none;"
-        ></iframe>
-    """
-    st.markdown(pdf_display, unsafe_allow_html=True)
-
 
 # ======================================================
 # TWO COLUMN LAYOUT
@@ -41,9 +18,8 @@ def pdf_viewer(file_path):
 
 left, right = st.columns([1, 1])
 
-
 # ======================================================
-# LEFT SIDE — FULL UI (NO SCROLL)
+# LEFT SIDE — FULL UI
 # ======================================================
 
 with left:
@@ -124,12 +100,14 @@ with left:
         value=False
     )
 
-    # 🚀 RUN BUTTON
+    # -------------------------
+    # RUN BUTTON
+    # -------------------------
+
     run_clicked = st.button(
         "🚀 Run Extraction",
         use_container_width=True
     )
-
 
 # ======================================================
 # PROCESSING
@@ -167,7 +145,6 @@ if run_clicked:
         )
 
     progress.progress(100)
-
     st.success("Extraction completed!")
 
     st.session_state["output_xlsx"] = output_xlsx
@@ -177,9 +154,8 @@ if run_clicked:
         if os.path.exists(debug_pdf):
             st.session_state["debug_pdf"] = debug_pdf
 
-
 # ======================================================
-# DOWNLOAD BUTTON (LEFT)
+# DOWNLOAD BUTTONS (LEFT)
 # ======================================================
 
 with left:
@@ -193,8 +169,8 @@ with left:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-    if "debug_pdf" in st.session_state:
 
+    if "debug_pdf" in st.session_state:
         with open(st.session_state["debug_pdf"], "rb") as f:
             st.download_button(
                 "⬇️ Download Debug Overlay PDF",
@@ -204,39 +180,25 @@ with left:
                 use_container_width=True
             )
 
-
 # ======================================================
-# RIGHT SIDE — SCROLLABLE PDF ONLY
+# RIGHT SIDE — SCROLLABLE PDF VIEWER
 # ======================================================
 
 with right:
+
     st.subheader("🔍 Debug PDF Viewer")
 
-    if "debug_pdf" in st.session_state and st.session_state["debug_pdf"]:
+    if "debug_pdf" in st.session_state:
 
         debug_path = st.session_state["debug_pdf"]
 
         if os.path.exists(debug_path):
 
-            # Read full PDF
             with open(debug_path, "rb") as f:
                 pdf_bytes = f.read()
 
-            # Encode to base64
-            base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-
-            # Scrollable iframe viewer
-            pdf_display = f"""
-                <iframe
-                    src="data:application/pdf;base64,{base64_pdf}"
-                    width="100%"
-                    height="900px"
-                    type="application/pdf"
-                    style="border:none;">
-                </iframe>
-            """
-
-            st.markdown(pdf_display, unsafe_allow_html=True)
+            # Native Streamlit PDF viewer (scrollable + chrome-safe)
+            st.pdf(pdf_bytes)
 
         else:
             st.info("Debug file not found.")
