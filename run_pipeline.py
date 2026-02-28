@@ -1,6 +1,6 @@
 from collections import defaultdict, Counter
 from openpyxl import Workbook
-
+import re, os
 from multitable_inline.extract_mark_table import extract_mark_table
 from multitable_inline.extract_ss_equivalent_table import extract_ss_equivalent_table
 from multitable_inline.extract_multi_pn_table import extract_multi_pn_table
@@ -949,3 +949,4 @@ if __name__ == "__main__":
         #pages=[433]
     )
  
+
