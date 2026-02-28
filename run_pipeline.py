@@ -1,6 +1,6 @@
 from collections import defaultdict, Counter
 from openpyxl import Workbook
-import re, os
+
 from multitable_inline.extract_mark_table import extract_mark_table
 from multitable_inline.extract_ss_equivalent_table import extract_ss_equivalent_table
 from multitable_inline.extract_multi_pn_table import extract_multi_pn_table
@@ -23,7 +23,6 @@ from multitable_inline.inline_pn_extractor import extract_inline_pns
 from multitable_inline.extract_alt_id_parts import extract_alt_id_parts
 from multitable_inline.patterns import PART_NO_REGEX
 from multitable_inline.title_extractor import (extract_page_title, extract_prev_page_title)
-from difflib import SequenceMatcher
 
 KNOWN_VENDORS = [
     "INGERSOLL RAND",
@@ -320,16 +319,11 @@ def export_with_summary(all_parts,
     ])
     for p in all_parts:
         ws_parts.append([
-            vendor,
-            model,
-            p["description"],
+            p["page"],
             p.get("title", ""),
-            p.get("drawing_number", ""),
             p["part_no"],
-            f'{p["page"]}_{filename}',
-            project,
-            subproject,
-            equipment
+            p["description"],
+            p.get("drawing_number", "")
         ])
 
     # -------------------------------
@@ -439,14 +433,11 @@ def run(
     
         extracted_parts = []
         normalized = None
+        extraction_done = False
     
-        import re
     
         # =====================================================
         # ⭐ 1️⃣ FORCE MARK TABLE (HIGHEST PRIORITY)
-        # =====================================================
-        # =====================================================
-        # ⭐ 1️⃣ FORCE MARK TABLE (ROW-LEVEL STRICT)
         # =====================================================
         
         normalized_preview = normalize_table(page_data)
@@ -476,6 +467,8 @@ def run(
                     normalized,
                     debug=debug
                 )
+            if extracted_parts:
+                extraction_done = True
     
         # =====================================================
         # ⭐ 2️⃣ POS-ITEM TABLE (BEFORE STEP2)
@@ -503,7 +496,8 @@ def run(
                     normalized,
                     debug=debug
                 )
-
+            if extracted_parts:
+                extraction_done = True
         # -------------------------------------------------
         # SPECIAL SS-EQUIVALENT MULTI-PN TABLE
         # -------------------------------------------------
@@ -535,6 +529,10 @@ def run(
         
             normalized = normalize_table(page_data, debug=debug)
             extracted_parts = extract_ss_equivalent_table(normalized, debug=debug)
+
+        if extracted_parts:
+            extraction_done = True
+
     
         # =====================================================
         # ⭐ 3️⃣ SIMPLE 3-COLUMN TABLE (INDEPENDENT)
@@ -557,11 +555,14 @@ def run(
     
                 if simple_parts:
                     extracted_parts = simple_parts
+
+                if extracted_parts:
+                    extraction_done = True
     
         # =====================================================
         # ⭐ 4️⃣ GENERIC TABLE HANDLING (STEP2)
         # =====================================================
-        else:
+        elif not extraction_done:
     
             table_type = is_parts_table(page_data, debug=debug)
     
@@ -592,6 +593,8 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
     
                 # ---------- ALT-ID TABLE ----------
                 elif table_type == "ALT_ID_TABLE":
@@ -601,6 +604,9 @@ def run(
                             normalized,
                             debug=debug
                         )
+                        if extracted_parts:
+                            all_parts.extend(extracted_parts)
+                            continue
     
                 # ---------- SIMPLE 2COL ----------
                 elif table_type == "SIMPLE_2COL_TABLE":
@@ -610,6 +616,8 @@ def run(
                             normalized,
                             debug=debug
                         )
+                        if extracted_parts:
+                            extraction_done = True
                         
                 # ---------- POS DRAWING TABLE ----------
                 elif any(
@@ -623,6 +631,8 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
 
                 # ---------- ARTICLE NUMBER TABLE ----------
                 elif any(
@@ -644,6 +654,9 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
+
                 # ⭐ SINGLE LEVEL BOM MODE
                 # ⭐ SINGLE LEVEL BOM MODE
                 elif any(
@@ -662,37 +675,9 @@ def run(
                             normalized,
                             debug=debug
                         )
-                
-                # # ⭐ SPLIT HEADER ITEM/PART TABLE
-                # elif (
-                #     lambda normalized: any(
-                #         (
-                #             {"item", "part"}.issubset(
-                #                 {w["text"].lower() for w in normalized["rows"][i]["words"]}
-                #             )
-                #             and
-                #             "number" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                #             and
-                #             "qty." in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                #             and
-                #             "description" in {w["text"].lower() for w in normalized["rows"][i + 1]["words"]}
-                #         )
-                #         for i in range(len(normalized["rows"]) - 1)
-                #     )
-                # )(
-                #     normalize_table(page_data)
-                # ):
-                #     if debug:
-                #         print(f"[PIPELINE] Page {page_no} | SPLIT HEADER TABLE MODE")
-                
-                #     normalized = normalize_table(page_data, debug=debug)
-                
-                #     extracted_parts = extract_split_header_item_part_table(
-                #         normalized,
-                #         debug=debug
-                #     )
+                        if extracted_parts:
+                            extraction_done = True
 
-                # ---------- BALLOON BOM TABLE ----------
                 elif any(
                     (
                         "balloon" in row1_text
@@ -716,6 +701,8 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
 
                 elif any(
                     [
@@ -731,6 +718,8 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
 
                 # ⭐ PMH / MOS TABLE MODE
                 elif any(
@@ -754,6 +743,8 @@ def run(
                         normalized,
                         debug=debug
                     )
+                    if extracted_parts:
+                        extraction_done = True
 
                                 # ⭐ MULTI-PN TABLE MODE
                 elif (
@@ -776,8 +767,8 @@ def run(
                         normalized,
                         debug=debug
                     )
-
-
+                    if extracted_parts:
+                        extraction_done = True
 
                 # ---------- NORMAL TABLE ----------
                 else:
@@ -787,6 +778,8 @@ def run(
                             normalized,
                             debug=debug
                         )
+                        if extracted_parts:
+                            extraction_done = True
     
             # -------------------------------------------------
             # INLINE EXTRACTION (ONLY IF NOT TABLE)
@@ -803,16 +796,27 @@ def run(
         # =====================================================
         # TITLE EXTRACTION (WITH DEBUG TRACE SUPPORT)
         # =====================================================
-        
+        print(f"[ENTERING TITLE BLOCK] Page {page_no}")
         if not extracted_parts:
             continue
-        
         title = None
         title_words = []
         
-        # 1️⃣ Prefer table structural title
-        if extracted_parts and extracted_parts[0].get("title"):
-            title = extracted_parts[0]["title"]
+        # 1️⃣ Prefer extractor-assigned title (highest priority)
+        for p in extracted_parts:
+            if p.get("title"):
+                title = p["title"]
+                break
+        
+        # 2️⃣ Structural table title (only if extractor didn't set one)
+        if not title and normalized and normalized.get("table_title"):
+            title = normalized["table_title"]
+        
+            # 🔴 Capture geometry for structural title
+            title_words = [
+                w for w in words
+                if w["text"] in title.split()
+            ]
         
             # structural titles already carry title_boxes via extractor
             # so we don't need to re-detect words here
@@ -839,6 +843,7 @@ def run(
                 pn_top = _first_pn_top(words, debug=debug)
             
             # Now run page title detection
+            print(f"[DEBUG] Page {page_no} | pn_top = {pn_top}")
             if pn_top is not None:
                 result = extract_page_title(words, pn_top)
 
@@ -864,7 +869,7 @@ def run(
         for p in extracted_parts:
             p["title"] = title or ""
         
-            # 🔴 Inject title boxes into trace for overlay
+            #  Inject title boxes into trace for overlay
             if debug and title_words:
                 if "trace" not in p:
                     p["trace"] = {}
@@ -938,9 +943,9 @@ def run(
 # ==================================================
 if __name__ == "__main__":
     run(
-        pdf_path=r"C:\Users\Rajat\Downloads\350914031-Mo-mm-Mesa-Rotaria-Nov-Rst495-3g_debug.pdf",
-        output_csv=r"C:\Users\Rajat\Downloads\Bauer ME320D Breathing Air Compressor2.csv",
+        pdf_path=r"C:\Users\Shank\Desktop\parts_extractor\test_manuals\combined.pdf",
+        output_csv=r"C:\Users\Shank\Desktop\parts_extractor\combined.xlsx",
         debug=True,
-        pages=[158,173,160,161]
+        #pages=[433]
     )
  
